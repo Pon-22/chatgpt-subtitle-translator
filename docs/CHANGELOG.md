@@ -83,6 +83,12 @@ Some providers emit a `content.delta` event after `content.done` has already end
 
 When repeated structured-output failures reduced the dynamic batch budget until it rounded to zero, the next retry expanded to all remaining lines instead of shrinking, preventing the fallback to single-entry translation. Such retries now use the minimum batch size so the fallback proceeds as intended.
 
+#### CLI proxy honors `NO_PROXY`
+
+When `HTTP_PROXY` / `HTTPS_PROXY` were set, the CLI passed an `undici` proxy agent to Node's built-in `fetch`, which bundles a different `undici` version and rejects it - requests failed, and `NO_PROXY` exclusions (e.g. a local `OPENAI_BASE_URL` on `localhost`) were not reliably applied. The CLI now sends requests through `undici`'s own `fetch`, so hosts listed in `NO_PROXY` connect directly and all others go through the proxy.
+
+`createOpenAIClient()` (library API) no longer accepts a `proxyAgent` argument; proxy handling is now done in the CLI only.
+
 ### Other Changes
 
 - Repetition abort warnings now report the detected pattern's occurrence count and the active threshold.

@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path';
 import readline from 'node:readline'
 import * as undici from 'undici';
+import { OpenAI } from 'openai';
 
 import { Command, Option } from "commander"
 import log from 'loglevel'
@@ -26,22 +27,27 @@ import {
 
 import 'dotenv/config'
 
-const proxyAgent = getProxyAgent()
-const openai = createOpenAIClient(process.env.OPENAI_API_KEY, undefined, process.env.OPENAI_BASE_URL, proxyAgent)
+const openai = createCliOpenAIClient()
 const coolerChatGPTAPI = new CooldownContext(Number(process.env.OPENAI_API_RPM ?? 500), 60000, "ChatGPTAPI")
 const coolerOpenAIModerator = new CooldownContext(Number(process.env.OPENAI_API_MODERATOR_RPM ?? process.env.OPENAI_API_RPM ?? 500), 60000, "OpenAIModerator")
 
-function getProxyAgent() {
+function createCliOpenAIClient() {
+    const apiKey = process.env.OPENAI_API_KEY
+    const baseURL = process.env.OPENAI_BASE_URL
     const httpProxyConfig = process.env.http_proxy ?? process.env.HTTP_PROXY
     const httpsProxyConfig = process.env.https_proxy ?? process.env.HTTPS_PROXY
 
-    if (httpProxyConfig || httpsProxyConfig) {
-        log.debug("[CLI HTTP/HTTPS PROXY]", "Using HTTP/HTTPS Proxy from ENV Detected", { httpProxyConfig, httpsProxyConfig })
-        const proxyAgent = new undici.EnvHttpProxyAgent();
-        return proxyAgent
+    if (!httpProxyConfig && !httpsProxyConfig) {
+        return createOpenAIClient(apiKey, undefined, baseURL)
     }
 
-    return undefined
+    log.debug("[CLI HTTP/HTTPS PROXY]", "Using HTTP/HTTPS Proxy from ENV Detected", { httpProxyConfig, httpsProxyConfig })
+    // EnvHttpProxyAgent honors NO_PROXY. It must be paired with undici's own fetch:
+    // Node's global fetch bundles a different undici version and rejects the agent
+    const dispatcher = new undici.EnvHttpProxyAgent()
+    /** @type {typeof globalThis.fetch} */
+    const fetch = (input, init) => /** @type {any} */ (undici.fetch)(input, { ...init, dispatcher })
+    return new OpenAI({ apiKey, baseURL, maxRetries: 3, fetch })
 }
 
 /**

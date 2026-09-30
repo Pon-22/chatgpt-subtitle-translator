@@ -8,15 +8,13 @@ import { retryWrapper, sleep } from './helpers.mjs';
  * @param {string} apiKey
  * @param {boolean} [dangerouslyAllowBrowser]
  * @param {string} [baseURL]
- * @param {import('undici').ProxyAgent} proxyAgent
  */
-export function createOpenAIClient(apiKey, dangerouslyAllowBrowser = undefined, baseURL = undefined, proxyAgent = undefined) {
+export function createOpenAIClient(apiKey, dangerouslyAllowBrowser = undefined, baseURL = undefined) {
     return new OpenAI({
         apiKey,
         baseURL,
         dangerouslyAllowBrowser: dangerouslyAllowBrowser,
         maxRetries: 3,
-        fetchOptions: proxyAgent === undefined ? undefined : { dispatcher: proxyAgent },
     });
 }
 
