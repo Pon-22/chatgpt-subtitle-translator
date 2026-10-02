@@ -2,6 +2,7 @@
 
 import {
     loginChatGPT,
+    logoutChatGPT,
     loadChatGPTProfile,
     listChatGPTModels,
     CHATGPT_PROFILE_FILE,
@@ -41,35 +42,59 @@ try {
             break;
         }
 
-        case "status": {
-            const profile =
-                loadChatGPTProfile();
 
-            const savedAt =
-                Date.parse(profile.saved_at);
+        case "logout": {
+            const result =
+                await logoutChatGPT();
 
-            const expiresAt =
-                savedAt +
-                profile.expires_in * 1000;
-
-            const remainingSeconds =
-                Math.max(
-                    0,
-                    Math.floor(
-                        (expiresAt - Date.now()) / 1000
-                    )
-                );
-
-            if (!profile) {
+            if (
+                result.alreadySignedOut
+            ) {
                 console.log(
-                    "ChatGPT is not connected."
+                    "ChatGPT is already signed out."
                 );
+
                 break;
             }
 
             console.log(
-                "ChatGPT connected."
+                "ChatGPT signed out locally."
             );
+
+            if (
+                result.remoteRevocationConfirmed
+            ) {
+                console.log(
+                    "Remote OAuth session revoked."
+                );
+            }
+            else {
+                console.warn(
+                    "Remote OAuth revocation could not be confirmed."
+                );
+
+                if (result.warning) {
+                    console.warn(
+                        result.warning
+                    );
+                }
+            }
+
+            break;
+        }
+
+
+        case "status": {
+            const profile =
+                loadChatGPTProfile();
+
+            if (!profile) {
+                console.log(
+                    "ChatGPT has never been connected."
+                );
+
+                break;
+            }
 
             console.log(
                 "Account:",
@@ -82,6 +107,28 @@ try {
                 profile.client_id
             );
 
+            const connected =
+                Boolean(
+                    profile.access_token &&
+                    profile.refresh_token
+                );
+
+            if (!connected) {
+                console.log(
+                    "Status: signed out"
+                );
+
+                console.log(
+                    "Registration retained: yes"
+                );
+
+                break;
+            }
+
+            console.log(
+                "Status: connected"
+            );
+
             console.log(
                 "Plan usage:",
                 profile.scopes.includes(
@@ -91,20 +138,54 @@ try {
                     : "disabled"
             );
 
-            console.log(
-                "Access token expires in:",
-                `${remainingSeconds}s`
-            );
+            if (
+                profile.saved_at &&
+                typeof profile.expires_in ===
+                    "number"
+            ) {
+                const savedAt =
+                    Date.parse(
+                        profile.saved_at
+                    );
 
-            console.log(
-                "Access token expires at:",
-                new Date(
-                    expiresAt
-                ).toLocaleString()
-            );
+                if (
+                    Number.isFinite(
+                        savedAt
+                    )
+                ) {
+                    const expiresAt =
+                        savedAt +
+                        profile.expires_in *
+                            1000;
+
+                    const remainingSeconds =
+                        Math.max(
+                            0,
+                            Math.floor(
+                                (
+                                    expiresAt -
+                                    Date.now()
+                                ) / 1000
+                            )
+                        );
+
+                    console.log(
+                        "Access token expires in:",
+                        `${remainingSeconds}s`
+                    );
+
+                    console.log(
+                        "Access token expires at:",
+                        new Date(
+                            expiresAt
+                        ).toLocaleString()
+                    );
+                }
+            }
 
             break;
         }
+
 
         case "models": {
             const models =
@@ -128,6 +209,7 @@ try {
             break;
         }
 
+
         default:
             console.error(
                 "Usage:"
@@ -135,6 +217,10 @@ try {
 
             console.error(
                 "  node cli/chatgpt-auth.mjs login"
+            );
+
+            console.error(
+                "  node cli/chatgpt-auth.mjs logout"
             );
 
             console.error(
@@ -155,7 +241,11 @@ catch (error) {
         "ChatGPT authentication error:"
     );
 
-    console.error(error);
+    console.error(
+        error instanceof Error
+            ? error.message
+            : error
+    );
 
     process.exitCode = 1;
 }

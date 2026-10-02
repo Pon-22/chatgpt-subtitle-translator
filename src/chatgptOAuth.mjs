@@ -35,6 +35,9 @@ const SCOPES = [
 const APP_NAME =
     "ChatGPT Subtitle Translator";
 
+const OIDC_CONFIG_URL =
+    "https://auth.openai.com/.well-known/openid-configuration";
+
 export const CHATGPT_STORAGE_DIR = path.join(
     process.env.LOCALAPPDATA ?? os.homedir(),
     "chatgpt-subtitle-translator"
@@ -76,14 +79,14 @@ export const CHATGPT_PROFILE_FILE = path.join(
  * @property {string} subject
  * @property {string} client_id
  * @property {string} ext_agent_host_id
- * @property {string} id_token
- * @property {string} access_token
- * @property {string | undefined} refresh_token
- * @property {string} token_type
- * @property {number} expires_in
- * @property {number | undefined} earliest_refresh_at
+ * @property {string} [id_token]
+ * @property {string} [access_token]
+ * @property {string} [refresh_token]
+ * @property {string} [token_type]
+ * @property {number} [expires_in]
+ * @property {number} [earliest_refresh_at]
  * @property {string[]} scopes
- * @property {string} saved_at
+ * @property {string} [saved_at]
  */
 
 
@@ -894,6 +897,14 @@ function accessTokenStillValid(
     profile,
     minimumSeconds = 120
 ) {
+    if (
+        !profile.access_token ||
+        !profile.saved_at ||
+        typeof profile.expires_in !== "number"
+    ) {
+        return false;
+    }
+
     const saved =
         Date.parse(
             profile.saved_at
@@ -916,6 +927,9 @@ function accessTokenStillValid(
 }
 
 
+/**
+ * @returns {Promise<string>}
+ */
 export async function getChatGPTAccessToken() {
     let profile =
         loadChatGPTProfile();
@@ -923,6 +937,15 @@ export async function getChatGPTAccessToken() {
     if (!profile) {
         throw new Error(
             "ChatGPT is not connected. Run the login command first."
+        );
+    }
+
+    if (
+        !profile.access_token &&
+        !profile.refresh_token
+    ) {
+        throw new Error(
+            "ChatGPT is signed out. Run the login command first."
         );
     }
 
@@ -947,7 +970,181 @@ export async function getChatGPTAccessToken() {
             );
     }
 
+    if (!profile.access_token) {
+        throw new Error(
+            "No ChatGPT access token is available. Sign in again."
+        );
+    }
+
     return profile.access_token;
+}
+
+
+async function getRevocationEndpoint() {
+    const response = await fetch(
+        OIDC_CONFIG_URL
+    );
+
+    if (!response.ok) {
+        throw new Error(
+            `Could not load OpenID configuration (${response.status}).`
+        );
+    }
+
+    const config =
+        /** @type {{ revocation_endpoint?: string }} */ (
+            await response.json()
+        );
+
+    if (!config.revocation_endpoint) {
+        throw new Error(
+            "OpenID configuration does not contain a revocation endpoint."
+        );
+    }
+
+    return config.revocation_endpoint;
+}
+
+
+export async function logoutChatGPT() {
+    const profile =
+        loadChatGPTProfile();
+
+    if (!profile) {
+        return {
+            remoteRevocationConfirmed: true,
+            alreadySignedOut: true,
+        };
+    }
+
+    if (
+        !profile.access_token &&
+        !profile.refresh_token &&
+        !profile.id_token
+    ) {
+        return {
+            remoteRevocationConfirmed: true,
+            alreadySignedOut: true,
+        };
+    }
+
+    let remoteRevocationConfirmed =
+        !profile.refresh_token;
+
+    let warning;
+
+    if (profile.refresh_token) {
+        try {
+            const endpoint =
+                await getRevocationEndpoint();
+
+            const body =
+                new URLSearchParams({
+                    token:
+                        profile.refresh_token,
+
+                    token_type_hint:
+                        "refresh_token",
+
+                    client_id:
+                        profile.client_id,
+                });
+
+            for (
+                let attempt = 0;
+                attempt < 3;
+                attempt++
+            ) {
+                try {
+                    const response =
+                        await fetch(
+                            endpoint,
+                            {
+                                method: "POST",
+
+                                headers: {
+                                    "Content-Type":
+                                        "application/x-www-form-urlencoded",
+                                },
+
+                                body,
+                            }
+                        );
+
+                    if (response.ok) {
+                        remoteRevocationConfirmed =
+                            true;
+
+                        break;
+                    }
+
+                    warning =
+                        `OAuth revocation returned HTTP ${response.status}.`;
+
+                    if (
+                        response.status < 500
+                    ) {
+                        break;
+                    }
+                }
+                catch (error) {
+                    warning =
+                        error instanceof Error
+                            ? error.message
+                            : String(error);
+                }
+
+                await new Promise(
+                    resolve =>
+                        setTimeout(
+                            resolve,
+                            250 *
+                                (2 ** attempt)
+                        )
+                );
+            }
+        }
+        catch (error) {
+            warning =
+                error instanceof Error
+                    ? error.message
+                    : String(error);
+        }
+    }
+
+    /*
+     * Keep the registration/account mapping.
+     * Clear renewable credentials only.
+     */
+    /** @type {ChatGPTProfile} */
+    const signedOutProfile = {
+        email:
+            profile.email,
+
+        issuer:
+            profile.issuer,
+
+        subject:
+            profile.subject,
+
+        client_id:
+            profile.client_id,
+
+        ext_agent_host_id:
+            profile.ext_agent_host_id,
+
+        scopes: [],
+    };
+
+    saveChatGPTProfile(
+        signedOutProfile
+    );
+
+    return {
+        remoteRevocationConfirmed,
+        alreadySignedOut: false,
+        warning,
+    };
 }
 
 
