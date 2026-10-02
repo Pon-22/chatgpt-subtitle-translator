@@ -45,6 +45,21 @@ try {
             const profile =
                 loadChatGPTProfile();
 
+            const savedAt =
+                Date.parse(profile.saved_at);
+
+            const expiresAt =
+                savedAt +
+                profile.expires_in * 1000;
+
+            const remainingSeconds =
+                Math.max(
+                    0,
+                    Math.floor(
+                        (expiresAt - Date.now()) / 1000
+                    )
+                );
+
             if (!profile) {
                 console.log(
                     "ChatGPT is not connected."
@@ -74,6 +89,18 @@ try {
                 )
                     ? "enabled"
                     : "disabled"
+            );
+
+            console.log(
+                "Access token expires in:",
+                `${remainingSeconds}s`
+            );
+
+            console.log(
+                "Access token expires at:",
+                new Date(
+                    expiresAt
+                ).toLocaleString()
             );
 
             break;

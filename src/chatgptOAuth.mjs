@@ -791,6 +791,10 @@ async function refreshChatGPTProfile(
         );
     }
 
+    console.log(
+        "[ChatGPT OAuth] Refreshing access token..."
+    );
+
     const body =
         new URLSearchParams({
             grant_type:
@@ -876,6 +880,10 @@ async function refreshChatGPTProfile(
 
     saveChatGPTProfile(
         updated
+    );
+
+    console.log(
+        "[ChatGPT OAuth] Access token refreshed."
     );
 
     return updated;
