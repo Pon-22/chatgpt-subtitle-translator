@@ -15,6 +15,7 @@ export const HISTORY_COST_RATIO_PRIOR = 3
  *
  * @typedef TranslationServiceContext
  * @property {import("openai").OpenAI} openai - Configured OpenAI client instance
+ * @property {typeof import('./chatgptResponses.mjs').createChatGPTResponse} [chatgptResponse]
  * @property {import('./cooldown.mjs').CooldownContext} [cooler] - Optional cooldown controller for rate-limit back-off
  * @property {(data: string) => void} [onStreamChunk] - Called for each streamed token chunk
  * @property {() => void} [onStreamEnd] - Called when a stream response finishes

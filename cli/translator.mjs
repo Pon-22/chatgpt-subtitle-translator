@@ -9,6 +9,14 @@ import { Command, Option } from "commander"
 import log from 'loglevel'
 
 import {
+    getChatGPTAccessToken,
+} from "../src/chatgptOAuth.mjs";
+
+import {
+    createChatGPTResponse,
+} from "../src/chatgptResponses.mjs";
+
+import {
     DefaultOptions,
     Translator,
     TranslatorStructuredObject,
@@ -27,7 +35,6 @@ import {
 
 import 'dotenv/config'
 
-const openai = createCliOpenAIClient()
 const coolerChatGPTAPI = new CooldownContext(Number(process.env.OPENAI_API_RPM ?? 500), 60000, "ChatGPTAPI")
 const coolerOpenAIModerator = new CooldownContext(Number(process.env.OPENAI_API_MODERATOR_RPM ?? process.env.OPENAI_API_RPM ?? 500), 60000, "OpenAIModerator")
 
@@ -59,6 +66,21 @@ function addTranslatorOptions(cmd) {
     return cmd
         .option("--from <language>", "Source language")
         .option("--to <language>", "Target language", "English")
+
+        .addOption(
+            new Option(
+                "--auth <mode>",
+                "Authentication mode"
+            )
+                .choices([
+                    "api-key",
+                    "chatgpt"
+                ])
+                .default(
+                    "api-key"
+                )
+        )
+
         .option("-m, --model <model>", "OpenAI model to use for translation", process.env.OPENAI_DEFAULT_MODEL ?? DefaultOptions.createChatCompletionRequest.model)
         .option("--moderation-model <model>", "OpenAI moderation model", DefaultOptions.moderationModel)
 
@@ -187,6 +209,55 @@ function buildOptions(opts) {
  * @param {boolean} [agentMode]
  */
 async function run(opts, options, agentMode = false) {
+
+    const useChatGPT =
+        opts.auth === "chatgpt";
+
+
+    if (
+        useChatGPT &&
+        agentMode
+    ) {
+        throw new Error(
+            "ChatGPT OAuth currently supports structured array mode only; agent mode is not implemented yet."
+        );
+    }
+
+
+    if (
+        useChatGPT &&
+        options.structuredMode !== "array"
+    ) {
+        throw new Error(
+            "ChatGPT OAuth currently supports --structured array only."
+        );
+    }
+
+
+    if (
+        useChatGPT &&
+        opts.useModerator
+    ) {
+        throw new Error(
+            "OpenAI Moderation is not enabled for ChatGPT OAuth mode."
+        );
+    }
+
+
+    const openai =
+        useChatGPT
+            ? new OpenAI({
+                apiKey:
+                    await getChatGPTAccessToken(),
+
+                baseURL:
+                    "https://api.openai.com/v1",
+
+                maxRetries:
+                    0,
+            })
+            : createCliOpenAIClient();
+
     /** Wraps a progress output callback to a no-op when the log level is silent. @template {Function} F @param {F} fn */
     const unlessSilent = (fn) => log.getLevel() === log.levels.SILENT ? () => { } : fn
 
@@ -204,7 +275,15 @@ async function run(opts, options, agentMode = false) {
      */
     const services = {
         openai,
-        cooler: coolerChatGPTAPI,
+
+        chatgptResponse:
+            useChatGPT
+                ? createChatGPTResponse
+                : undefined,
+
+        cooler:
+            coolerChatGPTAPI,
+            
         onStreamChunk: unlessSilent((data) => {
             process.stdout.write(data)
         }),

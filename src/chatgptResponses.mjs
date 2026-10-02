@@ -4,6 +4,9 @@ import {
     getChatGPTAccessToken,
 } from "./chatgptOAuth.mjs";
 
+import {
+    ChatStreamRepetitionError,
+} from "./openai.mjs";
 
 /**
  * Convert the Chat Completions-style messages currently used
@@ -76,6 +79,7 @@ export function convertMessagesToResponsesInput(messages) {
  *   messages: import("openai").OpenAI.Chat.ChatCompletionMessageParam[],
  *   textFormat?: object,
  *   onDelta?: (text: string) => void,
+ *   onController?: (controller: AbortController) => void,
  *   shouldAbort?: (buffer: string) => string | boolean | null
  * }} options
  * @returns {Promise<ChatGPTResponseResult>}
@@ -102,6 +106,10 @@ export async function createChatGPTResponse(options) {
 
     const controller =
         new AbortController();
+
+    options.onController?.(
+        controller
+    );
 
     /** @type {any} */
     const stream =
@@ -212,8 +220,8 @@ export async function createChatGPTResponse(options) {
     }
 
     if (repetitionPattern) {
-        throw new Error(
-            `Repetition detected: ${repetitionPattern}`
+        throw new ChatStreamRepetitionError(
+            String(repetitionPattern)
         );
     }
 

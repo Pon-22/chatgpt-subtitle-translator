@@ -22,28 +22,189 @@ export class TranslatorStructuredArray extends TranslatorStructuredBase {
      * @returns {Promise<TranslationOutput<string[]>>}
      */
     async doTranslatePrompt(lines) {
-        const messages = this.buildPromptMessages(JSON.stringify({ inputs: lines }))
+        const messages =
+            this.buildPromptMessages(
+                JSON.stringify({
+                    inputs: lines
+                })
+            );
 
         const structuredArray = z.object({
-            outputs: z.array(z.string())
-        })
+            outputs: z.array(
+                z.string()
+            )
+        });
 
         try {
-            const output = await this.requestStructured(lines, messages, {
-                structure: structuredArray,
-                name: "translation_array"
-            }, {
-                jsonStream: true,
-                onJsonStream: (runner) => this.jsonStreamParse(runner),
-            })
+            /*
+            * ChatGPT OAuth / Responses API
+            */
+            if (this.services.chatgptResponse) {
+                await this.services.cooler?.cool();
+
+                const result =
+                    await this.services.chatgptResponse({
+                        model:
+                            this.options
+                                .createChatCompletionRequest
+                                .model,
+
+                        messages,
+
+                        textFormat: {
+                            type:
+                                "json_schema",
+
+                            name:
+                                "translation_array",
+
+                            strict:
+                                true,
+
+                            schema: {
+                                type:
+                                    "object",
+
+                                properties: {
+                                    outputs: {
+                                        type:
+                                            "array",
+
+                                        items: {
+                                            type:
+                                                "string",
+                                        },
+                                    },
+                                },
+
+                                required: [
+                                    "outputs",
+                                ],
+
+                                additionalProperties:
+                                    false,
+                            },
+                        },
+
+                        onController: (
+                            controller
+                        ) => {
+                            this.streamController =
+                                controller;
+                        },
+
+                        shouldAbort: (
+                            buffer
+                        ) => {
+                            return this.checkRepetition(
+                                buffer
+                            );
+                        },
+                    });
+
+                const parsed =
+                    structuredArray.parse(
+                        JSON.parse(
+                            result.text
+                        )
+                    );
+
+                /*
+                * 保留原本 CLI 的 streaming/progress
+                * 顯示習慣。
+                *
+                * Responses 本身仍然是 stream:true，
+                * 只是這裡等完整 JSON 確認後才印字幕。
+                */
+                for (
+                    const output
+                    of parsed.outputs
+                ) {
+                    this.services
+                        .onStreamChunk?.(
+                            `${output}\n`
+                        );
+                }
+
+                this.services
+                    .onStreamEnd?.();
+
+                const usage =
+                    result.response?.usage;
+
+                return new TranslationOutput(
+                    parsed.outputs,
+
+                    usage?.input_tokens ??
+                        0,
+
+                    usage?.output_tokens ??
+                        0,
+
+                    usage
+                        ?.input_tokens_details
+                        ?.cached_tokens ??
+                        0,
+
+                    usage?.total_tokens ??
+                        0
+                );
+            }
+
+            /*
+            * 原本 API Key / Chat Completions
+            */
+            const output =
+                await this.requestStructured(
+                    lines,
+
+                    messages,
+
+                    {
+                        structure:
+                            structuredArray,
+
+                        name:
+                            "translation_array"
+                    },
+
+                    {
+                        jsonStream:
+                            true,
+
+                        onJsonStream:
+                            (runner) =>
+                                this.jsonStreamParse(
+                                    runner
+                                ),
+                    }
+                );
 
             /** @type {import("openai/resources/chat/completions.mjs").ParsedChatCompletionMessage<{ outputs?: string[]; }>} */
-            const translation = output.choices[0].message
-            const linesOut = translation.refusal ? [translation.refusal] : translation.parsed.outputs
+            const translation =
+                output.choices[0].message;
 
-            return TranslationOutput.fromCompletion(linesOut, output)
-        } catch (error) {
-            return this.logAndHandleTranslateError(error, lines.length)
+            const linesOut =
+                translation.refusal
+                    ? [
+                        translation.refusal
+                    ]
+                    : translation
+                        .parsed
+                        .outputs;
+
+            return TranslationOutput
+                .fromCompletion(
+                    linesOut,
+                    output
+                );
+        }
+        catch (error) {
+            return this
+                .logAndHandleTranslateError(
+                    error,
+                    lines.length
+                );
         }
     }
 
